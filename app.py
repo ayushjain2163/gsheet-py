@@ -81,13 +81,15 @@ def save_workbook(sheets):
 
 def initialize_missing_dataframes(budget, vendors, projects, divisions, districts, entries, entry_gadgets):
     if budget.empty:
-        budget = pd.DataFrame([
-            {
-                "Total Allocated": 0.0,
-                "Total Spent": 0.0,
-                "Remaining Budget": 0.0,
-            }
-        ])
+        budget = pd.DataFrame(
+            [
+                {
+                    "Total Allocated": 0.0,
+                    "Total Spent": 0.0,
+                    "Remaining Budget": 0.0,
+                }
+            ]
+        )
 
     if vendors.empty:
         vendors = pd.DataFrame(columns=VENDOR_COLUMNS)
@@ -123,6 +125,10 @@ def to_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def format_currency(value):
+    return f"INR {to_float(value):,.2f}"
 
 
 def get_next_entry_id(entries):
@@ -169,15 +175,17 @@ def upsert_vendor(vendors, vendor_name, vendor_code, gross_amount):
     existing_vendor = find_vendor_row(vendors, vendor_name)
 
     if existing_vendor is None:
-        new_vendor = pd.DataFrame([
-            {
-                "Vendor Name": vendor_name,
-                "Vendor Code": vendor_code,
-                "Total Billed": float(gross_amount),
-                "Total Paid": float(gross_amount),
-                "Balance Due": 0.0,
-            }
-        ])
+        new_vendor = pd.DataFrame(
+            [
+                {
+                    "Vendor Name": vendor_name,
+                    "Vendor Code": vendor_code,
+                    "Total Billed": float(gross_amount),
+                    "Total Paid": float(gross_amount),
+                    "Balance Due": 0.0,
+                }
+            ]
+        )
         return pd.concat([vendors, new_vendor], ignore_index=True)
 
     vendor_idx = existing_vendor.name
@@ -197,9 +205,7 @@ def upsert_projects(projects, gadgets_payload):
     if projects.empty:
         projects = pd.DataFrame(columns=PROJECT_COLUMNS)
 
-    normalized_existing = set(
-        projects["Project Name"].astype(str).str.strip().str.lower()
-    )
+    normalized_existing = set(projects["Project Name"].astype(str).str.strip().str.lower())
 
     for gadget in gadgets_payload:
         project_name = str(gadget["Project Name"]).strip()
@@ -207,12 +213,14 @@ def upsert_projects(projects, gadgets_payload):
         if not project_name or normalized_name in normalized_existing:
             continue
 
-        new_project = pd.DataFrame([
-            {
-                "Project ID": get_next_project_id(projects),
-                "Project Name": project_name,
-            }
-        ])
+        new_project = pd.DataFrame(
+            [
+                {
+                    "Project ID": get_next_project_id(projects),
+                    "Project Name": project_name,
+                }
+            ]
+        )
         projects = pd.concat([projects, new_project], ignore_index=True)
         normalized_existing.add(normalized_name)
 
@@ -223,11 +231,7 @@ def get_master_options(df, column_name):
     if df.empty:
         return []
 
-    values = (
-        df[column_name]
-        .astype(str)
-        .str.strip()
-    )
+    values = df[column_name].astype(str).str.strip()
     values = [value for value in values.tolist() if value]
     return sorted(set(values), key=str.lower)
 
@@ -237,10 +241,7 @@ def upsert_master_value(df, column_name, value):
     if not cleaned_value:
         return df
 
-    existing_values = set(
-        df[column_name].astype(str).str.strip().str.lower()
-    ) if not df.empty else set()
-
+    existing_values = set(df[column_name].astype(str).str.strip().str.lower()) if not df.empty else set()
     if cleaned_value.lower() in existing_values:
         return df
 
@@ -248,8 +249,94 @@ def upsert_master_value(df, column_name, value):
     return pd.concat([df, new_row], ignore_index=True)
 
 
-def format_currency(value):
-    return f"INR {to_float(value):,.2f}"
+def build_gadget_payload(index, division_options, district_options):
+    with st.expander(f"Gadget {index + 1}", expanded=(index == 0)):
+        info_col1, info_col2 = st.columns(2)
+        gadget_name = info_col1.text_input(f"Gadget Name {index + 1}", key=f"gadget_name_{index}")
+        project_name = info_col2.text_input(f"Project Name {index + 1}", key=f"project_name_{index}")
+
+        loc_col1, loc_col2, loc_col3 = st.columns(3)
+        division_name = loc_col1.selectbox(f"Division {index + 1}", division_options, key=f"division_{index}")
+        if division_name == "Other":
+            division_name = loc_col1.text_input(f"New Division {index + 1}", key=f"new_division_{index}")
+
+        district_name = loc_col2.selectbox(f"District {index + 1}", district_options, key=f"district_{index}")
+        if district_name == "Other":
+            district_name = loc_col2.text_input(f"New District {index + 1}", key=f"new_district_{index}")
+
+        taluka = loc_col3.text_input(f"Taluka {index + 1}", key=f"taluka_{index}")
+        project_details = st.text_area(f"Project Details {index + 1}", key=f"project_details_{index}")
+
+        amount_col1, amount_col2, amount_col3 = st.columns(3)
+        total_amount = amount_col1.number_input(
+            f"Total Amount {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=1000.0,
+            key=f"total_amount_{index}",
+        )
+        security_deposit = amount_col2.number_input(
+            f"Security Deposit {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key=f"security_deposit_{index}",
+        )
+        gst = amount_col3.number_input(
+            f"GST {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key=f"gst_{index}",
+        )
+
+        deduct_col1, deduct_col2, deduct_col3 = st.columns(3)
+        tax = deduct_col1.number_input(
+            f"Tax {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key=f"tax_{index}",
+        )
+        vima = deduct_col2.number_input(
+            f"Vima {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key=f"vima_{index}",
+        )
+        kamgar_kalyan = deduct_col3.number_input(
+            f"Kamgar Kalyan {index + 1}",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key=f"kamgar_kalyan_{index}",
+        )
+
+        total_deduction = security_deposit + gst + tax + vima + kamgar_kalyan
+        gross_cost = total_amount - total_deduction
+
+        metric_col1, metric_col2 = st.columns(2)
+        metric_col1.metric(f"Gadget {index + 1} Total Deduction", format_currency(total_deduction))
+        metric_col2.metric(f"Gadget {index + 1} Gross Amount", format_currency(gross_cost))
+
+        return {
+            "Gadget No": index + 1,
+            "Gadget Name": gadget_name.strip(),
+            "Project Name": project_name.strip(),
+            "Division": str(division_name).strip(),
+            "District": str(district_name).strip(),
+            "Taluka": taluka.strip(),
+            "Project Details": project_details.strip(),
+            "Total Amount": float(total_amount),
+            "Security Deposit": float(security_deposit),
+            "GST": float(gst),
+            "Tax": float(tax),
+            "Vima": float(vima),
+            "Kamgar Kalyan": float(kamgar_kalyan),
+            "Total Deduction": float(total_deduction),
+            "Gross Cost": float(gross_cost),
+        }
 
 
 def main():
@@ -274,16 +361,16 @@ def main():
     remaining = to_float(budget.iloc[0]["Remaining Budget"])
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Budget", f"INR {total_alloc:,.2f}")
-    c2.metric("Total Spent", f"INR {total_spent:,.2f}")
-    c3.metric("Remaining Budget", f"INR {remaining:,.2f}")
+    c1.metric("Total Budget", format_currency(total_alloc))
+    c2.metric("Total Spent", format_currency(total_spent))
+    c3.metric("Remaining Budget", format_currency(remaining))
 
     st.subheader("Vendor Outstanding")
     st.dataframe(vendors[["Vendor Name", "Vendor Code", "Balance Due"]], use_container_width=True)
 
     st.divider()
-
     st.header("Create Entry")
+
     entry_col, summary_col = st.columns([1.7, 1])
 
     with entry_col:
@@ -297,104 +384,8 @@ def main():
         district_options = get_master_options(districts, "District Name") + ["Other"]
 
         gadgets_payload = []
-        for i in range(int(gadget_count)):
-            with st.expander(f"Gadget {i + 1}", expanded=(i == 0)):
-                info_col1, info_col2 = st.columns(2)
-                gadget_name = info_col1.text_input(f"Gadget Name {i + 1}", key=f"gadget_name_{i}")
-                project_name = info_col2.text_input(f"Project Name {i + 1}", key=f"project_name_{i}")
-
-                loc_col1, loc_col2, loc_col3 = st.columns(3)
-                division_name = loc_col1.selectbox(
-                    f"Division {i + 1}",
-                    division_options,
-                    key=f"division_{i}",
-                )
-                if division_name == "Other":
-                    division_name = loc_col1.text_input(f"New Division {i + 1}", key=f"new_division_{i}")
-
-                district_name = loc_col2.selectbox(
-                    f"District {i + 1}",
-                    district_options,
-                    key=f"district_{i}",
-                )
-                if district_name == "Other":
-                    district_name = loc_col2.text_input(f"New District {i + 1}", key=f"new_district_{i}")
-
-                taluka = loc_col3.text_input(f"Taluka {i + 1}", key=f"taluka_{i}")
-                project_details = st.text_area(f"Project Details {i + 1}", key=f"project_details_{i}")
-
-                amount_col1, amount_col2, amount_col3 = st.columns(3)
-                total_amount = amount_col1.number_input(
-                    f"Total Amount {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=1000.0,
-                    key=f"total_amount_{i}",
-                )
-                security_deposit = amount_col2.number_input(
-                    f"Security Deposit {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0,
-                    key=f"security_deposit_{i}",
-                )
-                gst = amount_col3.number_input(
-                    f"GST {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0,
-                    key=f"gst_{i}",
-                )
-
-                deduct_col1, deduct_col2, deduct_col3 = st.columns(3)
-                tax = deduct_col1.number_input(
-                    f"Tax {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0,
-                    key=f"tax_{i}",
-                )
-                vima = deduct_col2.number_input(
-                    f"Vima {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0,
-                    key=f"vima_{i}",
-                )
-                kamgar_kalyan = deduct_col3.number_input(
-                    f"Kamgar Kalyan {i + 1}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0,
-                    key=f"kamgar_kalyan_{i}",
-                )
-
-                total_deduction = security_deposit + gst + tax + vima + kamgar_kalyan
-                gross_cost = total_amount - total_deduction
-
-                metric_col1, metric_col2 = st.columns(2)
-                metric_col1.metric(f"Gadget {i + 1} Total Deduction", format_currency(total_deduction))
-                metric_col2.metric(f"Gadget {i + 1} Gross Amount", format_currency(gross_cost))
-
-                gadgets_payload.append(
-                    {
-                        "Gadget No": i + 1,
-                        "Gadget Name": gadget_name.strip(),
-                        "Project Name": project_name.strip(),
-                        "Division": str(division_name).strip(),
-                        "District": str(district_name).strip(),
-                        "Taluka": taluka.strip(),
-                        "Project Details": project_details.strip(),
-                        "Total Amount": float(total_amount),
-                        "Security Deposit": float(security_deposit),
-                        "GST": float(gst),
-                        "Tax": float(tax),
-                        "Vima": float(vima),
-                        "Kamgar Kalyan": float(kamgar_kalyan),
-                        "Total Deduction": float(total_deduction),
-                        "Gross Cost": float(gross_cost),
-                    }
-                )
+        for index in range(int(gadget_count)):
+            gadgets_payload.append(build_gadget_payload(index, division_options, district_options))
 
     gross_amount = sum(row["Gross Cost"] for row in gadgets_payload)
     total_deductions = sum(row["Total Deduction"] for row in gadgets_payload)
@@ -439,7 +430,7 @@ def main():
             st.error("Sum of gadget gross costs exceeds remaining budget.")
         elif any(not item["Gadget Name"] for item in gadgets_payload):
             st.error("Each gadget must have a name.")
-        elif any(not item["Project Name"].strip() for item in gadgets_payload):
+        elif any(not item["Project Name"] for item in gadgets_payload):
             st.error("Each gadget must have a project name.")
         elif any(not item["Division"] for item in gadgets_payload):
             st.error("Each gadget must have a division.")
@@ -453,18 +444,20 @@ def main():
             entry_id = get_next_entry_id(entries)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            new_entry = pd.DataFrame([
-                {
-                    "Entry ID": entry_id,
-                    "Date": now,
-                    "Vendor Name": str(vendor).strip(),
-                    "Vendor Code": str(vendor_code).strip(),
-                    "Check No": check_no.strip(),
-                    "Gross Amount": float(gross_amount),
-                    "Gadget Count": int(gadget_count),
-                    "Status": "Created",
-                }
-            ])
+            new_entry = pd.DataFrame(
+                [
+                    {
+                        "Entry ID": entry_id,
+                        "Date": now,
+                        "Vendor Name": vendor.strip(),
+                        "Vendor Code": vendor_code.strip(),
+                        "Check No": check_no.strip(),
+                        "Gross Amount": float(gross_amount),
+                        "Gadget Count": int(gadget_count),
+                        "Status": "Created",
+                    }
+                ]
+            )
 
             new_gadgets = pd.DataFrame(
                 [
@@ -492,8 +485,9 @@ def main():
 
             entries = pd.concat([entries, new_entry], ignore_index=True)
             entry_gadgets = pd.concat([entry_gadgets, new_gadgets], ignore_index=True)
-            vendors = upsert_vendor(vendors, str(vendor).strip(), str(vendor_code).strip(), gross_amount)
+            vendors = upsert_vendor(vendors, vendor.strip(), vendor_code.strip(), gross_amount)
             projects = upsert_projects(projects, gadgets_payload)
+
             for row in gadgets_payload:
                 divisions = upsert_master_value(divisions, "Division Name", row["Division"])
                 districts = upsert_master_value(districts, "District Name", row["District"])
@@ -520,8 +514,8 @@ def main():
                 st.rerun()
 
     st.divider()
-
     st.header("Entry History")
+
     if entries.empty:
         st.info("No entries created yet.")
         return
@@ -529,14 +523,10 @@ def main():
     entries_view = entries.sort_values("Date", ascending=False)
     total_gross = entries_view["Gross Amount"].apply(to_float).sum()
 
-    st.metric("Total Gross Amount", f"INR {total_gross:,.2f}")
+    st.metric("Total Gross Amount", format_currency(total_gross))
     st.dataframe(entries_view, use_container_width=True, height=320)
 
-    selected_entry = st.selectbox(
-        "View Gadgets for Entry",
-        entries_view["Entry ID"].astype(str).tolist(),
-    )
-
+    selected_entry = st.selectbox("View Gadgets for Entry", entries_view["Entry ID"].astype(str).tolist())
     selected_gadgets = entry_gadgets[entry_gadgets["Entry ID"].astype(str) == str(selected_entry)]
     st.dataframe(selected_gadgets, use_container_width=True, height=260)
 
